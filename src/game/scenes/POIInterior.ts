@@ -1,8 +1,12 @@
 import { Scene } from 'phaser';
-import { POI } from '../systems/overworld/worldGen';
+import { POI, WorldSeed } from '../systems/overworld/worldGen';
+import { EncounterSystemState } from '../systems/overworld/encounter';
 
 export class POIInterior extends Scene {
     private poi?: POI;
+    private heroPosition?: { x: number; y: number };
+    private worldData?: WorldSeed;
+    private encounterState?: EncounterSystemState;
     private titleText?: Phaser.GameObjects.Text;
     private descriptionText?: Phaser.GameObjects.Text;
     private exitButton?: Phaser.GameObjects.Text;
@@ -11,8 +15,16 @@ export class POIInterior extends Scene {
         super('POIInterior');
     }
 
-    init(data: { poi: POI }) {
+    init(data: {
+        poi: POI;
+        heroPosition: { x: number; y: number };
+        worldData: WorldSeed;
+        encounterState: EncounterSystemState;
+    }) {
         this.poi = data.poi;
+        this.heroPosition = data.heroPosition;
+        this.worldData = data.worldData;
+        this.encounterState = data.encounterState;
     }
 
     create() {
@@ -20,6 +32,12 @@ export class POIInterior extends Scene {
             console.error('No POI data provided to POIInterior scene');
             this.scene.start('OverworldScene');
             return;
+        }
+
+        if (!this.worldData) {
+            console.warn(
+                'No world data provided to POIInterior scene - this may cause world regeneration'
+            );
         }
 
         // Create background based on POI type
@@ -159,7 +177,11 @@ export class POIInterior extends Scene {
 
     private exitPOI = (): void => {
         console.log(`Exiting ${this.poi!.name}`);
-        this.scene.start('OverworldScene');
+        this.scene.start('OverworldScene', {
+            heroPosition: this.heroPosition,
+            worldData: this.worldData,
+            encounterState: this.encounterState,
+        });
     };
 }
 

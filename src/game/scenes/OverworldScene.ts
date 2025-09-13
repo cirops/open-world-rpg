@@ -1,20 +1,22 @@
 import { Scene } from 'phaser';
 import { WorldGenerator, WorldSeed, POI } from '../systems/overworld/worldGen';
-import { EncounterSystem, Encounter } from '../systems/overworld/encounter';
+import { EncounterSystem, Encounter, EncounterSystemState } from '../systems/overworld/encounter';
 
 export class OverworldScene extends Scene {
-    private heroSprite?: Phaser.GameObjects.Image;
+    private heroSprite?: Phaser.GameObjects.Sprite;
     private worldGen: WorldGenerator;
     private encounterSystem: EncounterSystem;
     private worldData?: WorldSeed;
-    private poiGraphics: Map<string, Phaser.GameObjects.Graphics> = new Map();
+    private poiSprites: Map<string, Phaser.GameObjects.Sprite> = new Map();
     private encounterSprites: Map<string, Phaser.GameObjects.Sprite> = new Map();
-    private encounterGraphics: Map<string, Phaser.GameObjects.Graphics> = new Map();
     private debugText?: Phaser.GameObjects.Text;
     private worldTimeText?: Phaser.GameObjects.Text;
     private keys: { [key: string]: Phaser.Input.Keyboard.Key } = {};
     private poiLabels: Map<string, Phaser.GameObjects.Text> = new Map();
     private heroIndicator?: Phaser.GameObjects.Arc;
+    private miniMapContainer?: Phaser.GameObjects.Container;
+    private miniMapBorder?: Phaser.GameObjects.Rectangle;
+    private miniMapTitle?: Phaser.GameObjects.Text;
 
     private readonly poiColors = {
         town: 0xffd700, // Gold
@@ -29,18 +31,43 @@ export class OverworldScene extends Scene {
         this.encounterSystem = new EncounterSystem();
     }
 
-    create() {
+    create(data?: {
+        heroPosition?: { x: number; y: number };
+        worldData?: WorldSeed;
+        encounterState?: EncounterSystemState;
+    }) {
         console.log('🎮 OVERWORLD SCENE LOADING...');
 
-        // Set up camera bounds for larger world (no physics needed for overworld)
-        this.cameras.main.setBounds(0, 0, 2000, 1500);
+        // Set up camera bounds to include ocean area around the world
+        const worldWidth = 2000;
+        const worldHeight = 1500;
+        const oceanPadding = 300; // Extra space for ocean around the world
+        this.cameras.main.setBounds(
+            -oceanPadding,
+            -oceanPadding,
+            worldWidth + oceanPadding * 2,
+            worldHeight + oceanPadding * 2
+        );
 
-        // Set up world background
-        this.cameras.main.setBackgroundColor('#2d5a27'); // Dark forest green
+        // Create ocean background
+        this.createOceanBackground(worldWidth, worldHeight, oceanPadding);
 
-        // Generate world
-        this.worldData = this.worldGen.generateWorld(2000, 1500);
-        this.encounterSystem.updateZonesForPOIs(this.worldData.pois);
+        // Check if we have existing world data (returning from POI)
+        if (data?.worldData) {
+            console.log('🔄 Reusing existing world data...');
+            this.worldData = data.worldData;
+
+            // Restore encounter system state if provided
+            if (data.encounterState) {
+                console.log('🔄 Restoring encounter system state...');
+                this.encounterSystem.restoreState(data.encounterState);
+            }
+        } else {
+            console.log('🆕 Generating new world...');
+            // Generate world
+            this.worldData = this.worldGen.generateWorld(2000, 1500);
+            this.encounterSystem.updateZonesForPOIs(this.worldData.pois);
+        }
 
         console.log(`✅ Generated world with ${this.worldData.pois.length} POIs`);
         console.log(
@@ -50,9 +77,11 @@ export class OverworldScene extends Scene {
                 .join('\n   ')
         );
 
-        // Create hero sprite
-        this.heroSprite = this.add.image(1000, 750, 'star');
-        this.heroSprite.setScale(0.5);
+        // Create hero sprite - use saved position if returning from POI, otherwise default
+        const heroX = data?.heroPosition?.x ?? 1000;
+        const heroY = data?.heroPosition?.y ?? 750;
+        this.heroSprite = this.add.sprite(heroX, heroY, 'medievalRTS', 'medievalUnit_01.png');
+        this.heroSprite.setScale(0.8); // Scale up the unit sprite appropriately
         this.cameras.main.startFollow(this.heroSprite);
 
         // Make camera follow with some dead zone for better exploration
@@ -92,6 +121,9 @@ export class OverworldScene extends Scene {
         // Create POI sprites
         this.createPOISprites();
 
+        // Update POI visuals initially
+        this.updatePOIVisuals();
+
         // Create debug UI
         this.createDebugUI();
 
@@ -118,15 +150,14 @@ export class OverworldScene extends Scene {
         this.worldData.pois.forEach((poi) => {
             console.log(`Creating POI: ${poi.name} at (${poi.x}, ${poi.y})`);
 
-            // Create a simple shape for the POI using graphics only
-            const graphics = this.add.graphics();
-            graphics.fillStyle(this.poiColors[poi.type]);
-            graphics.fillCircle(poi.x, poi.y, 15);
-            graphics.lineStyle(2, 0xffffff);
-            graphics.strokeCircle(poi.x, poi.y, 15);
+            // Get appropriate sprite for POI type
+            const spriteKey = this.getPOISpriteKey(poi.type);
+            const sprite = this.add.sprite(poi.x, poi.y, 'medievalRTS', spriteKey);
+            sprite.setScale(0.6); // Scale down structures to fit better
+            sprite.setDepth(5);
 
             // Add a text label for the POI
-            const label = this.add.text(poi.x, poi.y - 25, poi.name, {
+            const label = this.add.text(poi.x, poi.y - 40, poi.name, {
                 fontFamily: 'monospace',
                 fontSize: 10,
                 color: '#ffffff',
@@ -136,35 +167,23 @@ export class OverworldScene extends Scene {
             label.setOrigin(0.5);
             label.setDepth(10); // Ensure labels are visible above other elements
 
-            // Ensure graphics are visible
-            graphics.setDepth(5);
-
             // Make POI interactive
-            const hitArea = new Phaser.Geom.Circle(poi.x, poi.y, 20);
-            graphics.setInteractive(hitArea, Phaser.Geom.Circle.Contains);
+            sprite.setInteractive();
 
-            graphics.on('pointerdown', () => {
+            sprite.on('pointerdown', () => {
                 console.log(`POI clicked: ${poi.name}`);
                 this.onPOIClick(poi);
             });
 
-            graphics.on('pointerover', () => {
-                graphics.clear();
-                graphics.fillStyle(0xffffff);
-                graphics.fillCircle(poi.x, poi.y, 17);
-                graphics.lineStyle(3, this.poiColors[poi.type]);
-                graphics.strokeCircle(poi.x, poi.y, 17);
+            sprite.on('pointerover', () => {
+                sprite.setTint(0xffffff); // Brighten on hover
             });
 
-            graphics.on('pointerout', () => {
-                graphics.clear();
-                graphics.fillStyle(this.poiColors[poi.type]);
-                graphics.fillCircle(poi.x, poi.y, 15);
-                graphics.lineStyle(2, 0xffffff);
-                graphics.strokeCircle(poi.x, poi.y, 15);
+            sprite.on('pointerout', () => {
+                sprite.clearTint(); // Remove tint on mouse out
             });
 
-            this.poiGraphics.set(poi.id, graphics);
+            this.poiSprites.set(poi.id, sprite);
 
             // Store label for cleanup
             this.poiLabels.set(poi.id, label);
@@ -174,21 +193,67 @@ export class OverworldScene extends Scene {
         this.addMiniMapIndicators();
     }
 
+    private getPOISpriteKey(poiType: string): string {
+        // Map POI types to appropriate medieval structure sprites
+        switch (poiType) {
+            case 'town':
+                return Phaser.Utils.Array.GetRandom([
+                    'medievalStructure_01.png', // Castle
+                    'medievalStructure_02.png', // Large structure
+                    'medievalStructure_13.png', // Castle variation
+                ]);
+            case 'manor':
+                return Phaser.Utils.Array.GetRandom([
+                    'medievalStructure_08.png', // Manor house
+                    'medievalStructure_09.png', // Large house
+                    'medievalStructure_11.png', // House variation
+                ]);
+            case 'camp':
+                return Phaser.Utils.Array.GetRandom([
+                    'medievalStructure_03.png', // Camp structure
+                    'medievalStructure_04.png', // Tent-like structure
+                    'medievalStructure_07.png', // Camp variation
+                ]);
+            case 'keep':
+                return Phaser.Utils.Array.GetRandom([
+                    'medievalStructure_14.png', // Keep
+                    'medievalStructure_15.png', // Fortress
+                    'medievalStructure_16.png', // Tower
+                ]);
+            default:
+                return 'medievalStructure_01.png'; // Default castle
+        }
+    }
+
     private addMiniMapIndicators() {
         if (!this.worldData) return;
 
-        // Create small indicators in the top-right corner showing POI positions
-        const miniMapX = 900;
-        const miniMapY = 50;
+        // Create a container for the minimap that's fixed to the camera
+        this.miniMapContainer = this.add.container(0, 0);
+
+        // Ensure the container was created successfully
+        if (!this.miniMapContainer) return;
+
+        // Position the container in the top-right corner of the viewport
+        const miniMapWidth = 120;
+        const miniMapHeight = 170;
+        const miniMapX = this.cameras.main.width - miniMapWidth - 20; // 20px from right edge
+        const miniMapY = 20; // 20px from top
+
+        this.miniMapContainer.setPosition(miniMapX, miniMapY);
+        this.miniMapContainer.setScrollFactor(0); // Don't scroll with camera
+        this.miniMapContainer.setDepth(1000); // High depth for HUD overlay
+
         const scale = 0.1; // Scale down the world coordinates
 
         this.worldData.pois.forEach((poi) => {
-            const indicatorX = miniMapX + poi.x * scale;
-            const indicatorY = miniMapY + poi.y * scale;
+            // Convert world coordinates to minimap coordinates (relative to container)
+            const indicatorX = poi.x * scale;
+            const indicatorY = poi.y * scale;
 
             // Small dot for each POI
             const indicator = this.add.circle(indicatorX, indicatorY, 3, this.poiColors[poi.type]);
-            indicator.setDepth(15);
+            this.miniMapContainer!.add(indicator);
 
             // POI type letter
             const typeLetter = poi.type.charAt(0).toUpperCase();
@@ -198,38 +263,225 @@ export class OverworldScene extends Scene {
                 color: '#ffffff',
             });
             typeText.setOrigin(0.5);
-            typeText.setDepth(16);
+            this.miniMapContainer!.add(typeText);
         });
 
-        // Add mini-map border
-        this.add.rectangle(miniMapX + 50, miniMapY + 75, 120, 170).setStrokeStyle(2, 0xffffff);
-        this.add
-            .text(miniMapX + 50, miniMapY - 10, 'MINI-MAP', {
-                fontFamily: 'monospace',
-                fontSize: 10,
-                color: '#ffffff',
-            })
-            .setOrigin(0.5);
+        // Add mini-map border (relative to container)
+        this.miniMapBorder = this.add.rectangle(
+            miniMapWidth / 2,
+            miniMapHeight / 2,
+            miniMapWidth,
+            miniMapHeight
+        );
+        this.miniMapBorder.setStrokeStyle(2, 0xffffff);
+        this.miniMapBorder.setFillStyle(0x000000, 0.7); // Semi-transparent background
+        this.miniMapContainer!.add(this.miniMapBorder);
 
-        // Add hero position indicator (yellow dot)
+        // Add mini-map title
+        this.miniMapTitle = this.add.text(miniMapWidth / 2, -15, 'MINI-MAP', {
+            fontFamily: 'monospace',
+            fontSize: 10,
+            color: '#ffffff',
+        });
+        this.miniMapTitle.setOrigin(0.5);
+        this.miniMapContainer!.add(this.miniMapTitle);
+
+        // Add hero position indicator (yellow dot) - this will be updated dynamically
         this.heroIndicator = this.add.circle(0, 0, 4, 0xffff00);
-        this.heroIndicator.setDepth(20);
+        this.miniMapContainer!.add(this.heroIndicator);
 
         // Update hero indicator position initially
         this.updateHeroIndicator();
     }
 
+    private createOceanBackground(
+        worldWidth: number | undefined,
+        worldHeight: number | undefined,
+        oceanPadding: number
+    ): void {
+        // Use default values if parameters are undefined
+        const wWidth = worldWidth ?? 2000;
+        const wHeight = worldHeight ?? 1500;
+
+        // Create tiled terrain system using sprites
+        this.createTiledTerrain(wWidth, wHeight, oceanPadding);
+    }
+
+    private createTiledTerrain(
+        worldWidth: number,
+        worldHeight: number,
+        oceanPadding: number
+    ): void {
+        const tileSize = 128; // Most tiles are 128x128 pixels
+        const tileContainer = this.add.container(0, 0);
+        tileContainer.setDepth(-10);
+
+        // Create ocean area with water tiles
+        const oceanTiles = ['medievalTile_27.png']; // Blue water tile
+        const totalWidth = worldWidth + oceanPadding * 2;
+        const totalHeight = worldHeight + oceanPadding * 2;
+
+        for (let x = -oceanPadding; x < totalWidth; x += tileSize) {
+            for (let y = -oceanPadding; y < totalHeight; y += tileSize) {
+                // Determine if we're in ocean or land area
+                const isOcean = x < 0 || y < 0 || x >= worldWidth || y >= worldHeight;
+
+                if (isOcean) {
+                    // Ocean tiles
+                    const tileKey = Phaser.Utils.Array.GetRandom(oceanTiles);
+                    const tile = this.add.sprite(
+                        x + tileSize / 2,
+                        y + tileSize / 2,
+                        'medievalRTS',
+                        tileKey
+                    );
+                    tile.setScale(1);
+                    tileContainer.add(tile);
+                } else {
+                    // Land tiles - mostly bare grass with sparse forest/bush tiles
+                    const landTiles = [
+                        // Mostly bare grass tiles (higher frequency)
+                        'medievalTile_57.png', // Bare grass
+                        'medievalTile_58.png', // Bare grass
+                        'medievalTile_57.png', // Bare grass (duplicated for more frequency)
+                        'medievalTile_58.png', // Bare grass (duplicated for more frequency)
+                        'medievalTile_57.png', // Bare grass (duplicated for more frequency)
+                        'medievalTile_58.png', // Bare grass (duplicated for more frequency)
+                        // Sparse forest/bush tiles (lower frequency)
+                        'medievalTile_41.png', // Forest/bush
+                        'medievalTile_42.png', // Forest/bush
+                        'medievalTile_43.png', // Forest/bush
+                        'medievalTile_44.png', // Forest/bush
+                        'medievalTile_45.png', // Forest/bush
+                        'medievalTile_46.png', // Forest/bush
+                        'medievalTile_47.png', // Forest/bush
+                        'medievalTile_48.png', // Forest/bush
+                    ];
+                    const tileKey = Phaser.Utils.Array.GetRandom(landTiles);
+                    const tile = this.add.sprite(
+                        x + tileSize / 2,
+                        y + tileSize / 2,
+                        'medievalRTS',
+                        tileKey
+                    );
+                    tile.setScale(1);
+                    tileContainer.add(tile);
+                }
+            }
+        }
+
+        // Skip beach tiles for clean transition from grass to ocean
+
+        // Add some environmental decorations
+        this.addEnvironmentalDecorations(worldWidth, worldHeight);
+    }
+
+    private addBeachTiles(worldWidth: number, worldHeight: number): void {
+        const tileSize = 128;
+        const beachContainer = this.add.container(0, 0);
+        beachContainer.setDepth(-3);
+
+        // Beach tiles along edges
+        const beachTiles = ['medievalTile_09.png', 'medievalTile_11.png', 'medievalTile_12.png']; // Sand/beach tiles
+
+        // Top beach
+        for (let x = 0; x < worldWidth; x += tileSize) {
+            const tileKey = Phaser.Utils.Array.GetRandom(beachTiles);
+            const tile = this.add.sprite(x + tileSize / 2, -tileSize / 2, 'medievalRTS', tileKey);
+            tile.setScale(1);
+            beachContainer.add(tile);
+        }
+
+        // Bottom beach
+        for (let x = 0; x < worldWidth; x += tileSize) {
+            const tileKey = Phaser.Utils.Array.GetRandom(beachTiles);
+            const tile = this.add.sprite(
+                x + tileSize / 2,
+                worldHeight + tileSize / 2,
+                'medievalRTS',
+                tileKey
+            );
+            tile.setScale(1);
+            beachContainer.add(tile);
+        }
+
+        // Left beach
+        for (let y = 0; y < worldHeight; y += tileSize) {
+            const tileKey = Phaser.Utils.Array.GetRandom(beachTiles);
+            const tile = this.add.sprite(-tileSize / 2, y + tileSize / 2, 'medievalRTS', tileKey);
+            tile.setScale(1);
+            beachContainer.add(tile);
+        }
+
+        // Right beach
+        for (let y = 0; y < worldHeight; y += tileSize) {
+            const tileKey = Phaser.Utils.Array.GetRandom(beachTiles);
+            const tile = this.add.sprite(
+                worldWidth + tileSize / 2,
+                y + tileSize / 2,
+                'medievalRTS',
+                tileKey
+            );
+            tile.setScale(1);
+            beachContainer.add(tile);
+        }
+    }
+
+    private addEnvironmentalDecorations(_worldWidth: number, _worldHeight: number): void {
+        // Clean terrain - no additional decorations to keep it simple and clean
+        // Just the ocean, grass tiles, POIs, and encounters
+    }
+
     private updateHeroIndicator() {
         if (!this.heroSprite || !this.heroIndicator) return;
 
-        const miniMapX = 900;
-        const miniMapY = 50;
         const scale = 0.1;
 
-        const indicatorX = miniMapX + this.heroSprite.x * scale;
-        const indicatorY = miniMapY + this.heroSprite.y * scale;
+        // Position relative to the minimap container (not world coordinates)
+        const indicatorX = this.heroSprite.x * scale;
+        const indicatorY = this.heroSprite.y * scale;
 
         this.heroIndicator.setPosition(indicatorX, indicatorY);
+    }
+
+    private updatePOIVisuals(): void {
+        if (!this.heroSprite || !this.worldData) return;
+
+        const maxEntryDistance = 50;
+
+        this.worldData.pois.forEach((poi) => {
+            const sprite = this.poiSprites.get(poi.id);
+            const label = this.poiLabels.get(poi.id);
+
+            if (!sprite || !label) return;
+
+            const distance = Phaser.Math.Distance.Between(
+                this.heroSprite!.x,
+                this.heroSprite!.y,
+                poi.x,
+                poi.y
+            );
+
+            const isCloseEnough = distance <= maxEntryDistance;
+
+            if (isCloseEnough) {
+                // Highlight POI when close enough to enter (green tint and glow)
+                sprite.setTint(0x00ff00); // Green tint
+                sprite.setScale(0.7); // Slightly larger scale
+
+                // Update label to show it's interactive
+                label.setColor('#00FF00'); // Green text
+                label.setText(`${poi.name} (ENTER)`);
+            } else {
+                // Normal POI appearance
+                sprite.clearTint();
+                sprite.setScale(0.6); // Normal scale
+
+                // Reset label to normal
+                label.setColor('#ffffff');
+                label.setText(poi.name);
+            }
+        });
     }
 
     private createDebugUI(): void {
@@ -260,27 +512,46 @@ export class OverworldScene extends Scene {
         const speed = 3;
         let moved = false;
 
+        // Calculate new position first (don't apply yet)
+        let newX = this.heroSprite.x;
+        let newY = this.heroSprite.y;
+
         if (this.keys.W.isDown) {
-            this.heroSprite.y -= speed;
+            newY -= speed;
             moved = true;
         }
         if (this.keys.S.isDown) {
-            this.heroSprite.y += speed;
+            newY += speed;
             moved = true;
         }
         if (this.keys.A.isDown) {
-            this.heroSprite.x -= speed;
+            newX -= speed;
             moved = true;
         }
         if (this.keys.D.isDown) {
-            this.heroSprite.x += speed;
+            newX += speed;
             moved = true;
         }
 
-        // Update debug info and mini-map
+        // Apply world boundary checking
+        const worldWidth = 2000;
+        const worldHeight = 1500;
+        const heroHalfSize = 8; // Approximate hero sprite size for boundary checking
+
+        // Clamp position to world bounds
+        newX = Math.max(heroHalfSize, Math.min(worldWidth - heroHalfSize, newX));
+        newY = Math.max(heroHalfSize, Math.min(worldHeight - heroHalfSize, newY));
+
+        // Apply the clamped position
+        if (newX !== this.heroSprite.x || newY !== this.heroSprite.y) {
+            this.heroSprite.setPosition(newX, newY);
+        }
+
+        // Update debug info, mini-map, and POI visuals
         if (moved) {
             this.updateDebugInfo();
             this.updateHeroIndicator();
+            this.updatePOIVisuals();
         }
     };
 
@@ -312,38 +583,106 @@ export class OverworldScene extends Scene {
     };
 
     private createEncounterSprite(encounter: Encounter): void {
-        const sprite = this.add.sprite(encounter.x, encounter.y, '');
-        sprite.setTint(encounter.hostile ? 0xff0000 : 0x00ff00);
+        // Get appropriate sprite for encounter type
+        const spriteKey = this.getEncounterSpriteKey(encounter);
+        const sprite = this.add.sprite(encounter.x, encounter.y, 'medievalRTS', spriteKey);
+        sprite.setScale(0.7); // Scale down units appropriately
+        sprite.setDepth(5);
 
-        // Create encounter visual
-        const graphics = this.add.graphics();
-        graphics.fillStyle(encounter.hostile ? 0xff0000 : 0x00ff00);
-        graphics.fillCircle(encounter.x, encounter.y, 8);
-        graphics.lineStyle(1, 0xffffff);
-        graphics.strokeCircle(encounter.x, encounter.y, 8);
+        // Add subtle pulsing effect
+        this.tweens.add({
+            targets: sprite,
+            scaleX: 0.8,
+            scaleY: 0.8,
+            duration: 1000,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut',
+        });
 
+        // Store the sprite
         this.encounterSprites.set(encounter.id, sprite);
-        this.encounterGraphics.set(encounter.id, graphics);
 
         // Auto-remove encounter after 30 seconds
         this.time.delayedCall(30000, () => {
-            graphics.destroy();
+            sprite.destroy();
             this.encounterSprites.delete(encounter.id);
-            this.encounterGraphics.delete(encounter.id);
             this.encounterSystem.removeEncounter(encounter.id);
         });
     }
 
+    private getEncounterSpriteKey(encounter: Encounter): string {
+        // Map encounter types to appropriate medieval unit sprites
+        switch (encounter.type) {
+            case 'guard':
+            case 'patrol':
+                return Phaser.Utils.Array.GetRandom([
+                    'medievalUnit_02.png', // Guard-like unit
+                    'medievalUnit_08.png', // Soldier
+                    'medievalUnit_10.png', // Warrior
+                ]);
+            case 'merchant':
+                return Phaser.Utils.Array.GetRandom([
+                    'medievalUnit_14.png', // Merchant/traveler
+                    'medievalUnit_20.png', // Merchant variation
+                ]);
+            case 'traveler':
+                return Phaser.Utils.Array.GetRandom([
+                    'medievalUnit_04.png', // Traveler
+                    'medievalUnit_09.png', // Wanderer
+                    'medievalUnit_15.png', // Pilgrim
+                ]);
+            case 'bandit':
+                return Phaser.Utils.Array.GetRandom([
+                    'medievalUnit_03.png', // Bandit
+                    'medievalUnit_12.png', // Rogue
+                    'medievalUnit_21.png', // Outlaw
+                ]);
+            case 'animal':
+                return Phaser.Utils.Array.GetRandom([
+                    'medievalUnit_05.png', // Animal
+                    'medievalUnit_11.png', // Creature
+                    'medievalUnit_16.png', // Beast
+                ]);
+            default:
+                return 'medievalUnit_01.png'; // Default unit
+        }
+    }
+
     private onPOIClick(poi: POI): void {
-        console.log(`Entering ${poi.name} (${poi.type})`);
+        if (!this.heroSprite) return;
+
+        // Check if hero is close enough to the POI (adjacent)
+        const distance = Phaser.Math.Distance.Between(
+            this.heroSprite.x,
+            this.heroSprite.y,
+            poi.x,
+            poi.y
+        );
+
+        const maxEntryDistance = 50; // Must be within 50 pixels to enter
+
+        if (distance > maxEntryDistance) {
+            console.log(
+                `Too far from ${poi.name} (${distance.toFixed(1)}px away). Must be within ${maxEntryDistance}px to enter.`
+            );
+            return;
+        }
+
+        console.log(`Entering ${poi.name} (${poi.type}) - Distance: ${distance.toFixed(1)}px`);
 
         // Mark POI as discovered
         if (this.worldData) {
             this.worldData = this.worldGen.discoverPOI(this.worldData, poi.id);
         }
 
-        // Transition to POI interior scene
-        this.scene.start('POIInterior', { poi });
+        // Transition to POI interior scene with hero position, world data, and encounter state
+        this.scene.start('POIInterior', {
+            poi,
+            heroPosition: { x: this.heroSprite.x, y: this.heroSprite.y },
+            worldData: this.worldData,
+            encounterState: this.encounterSystem.saveState(),
+        });
     }
 
     private updateDebugInfo(): void {

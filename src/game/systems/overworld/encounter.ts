@@ -21,11 +21,25 @@ export interface EncounterZone {
     density: number; // Encounters per hour
 }
 
+export interface EncounterSystemState {
+    activeEncounters: [string, Encounter][];
+    encounterZones: EncounterZone[];
+    worldTime: number;
+    lastEncounterCheck: number;
+    exploredAreas: string[];
+    lastHeroPosition: { x: number; y: number } | null;
+    explorationDistance: number;
+}
+
 export class EncounterSystem {
     private activeEncounters: Map<string, Encounter> = new Map();
     private encounterZones: EncounterZone[] = [];
     private worldTime: number = 0; // In game hours
     private lastEncounterCheck: number = 0;
+    private exploredAreas: Set<string> = new Set(); // Track explored grid areas
+    private lastHeroPosition: { x: number; y: number } | null = null;
+    private explorationDistance: number = 0; // Total distance explored
+    private discoveryChance: number = 0.15; // Chance to discover encounter per new area
 
     constructor() {
         this.initializeDefaultZones();
@@ -175,7 +189,7 @@ export class EncounterSystem {
     }
 
     /**
-     * Update world time and potentially spawn encounters
+     * Update world time and check for exploration-based encounters
      */
     update(deltaTime: number, heroX: number, heroY: number): Encounter[] {
         // Convert delta time to game hours (assuming 1 real second = 1 game minute)
@@ -185,17 +199,13 @@ export class EncounterSystem {
 
         const newEncounters: Encounter[] = [];
 
-        // Check for new encounters every 5 seconds (for testing)
-        if (this.worldTime - this.lastEncounterCheck > 5 / 3600) {
-            // 5 seconds in hours
-            const encounters = this.checkForEncounters(heroX, heroY);
-            if (encounters.length > 0) {
-                console.log(
-                    `Spawned ${encounters.length} encounters at hero position (${heroX.toFixed(0)}, ${heroY.toFixed(0)})`
-                );
-            }
-            newEncounters.push(...encounters);
-            this.lastEncounterCheck = this.worldTime;
+        // Track exploration and check for discovery-based encounters
+        const explorationEncounters = this.checkExplorationEncounters(heroX, heroY);
+        if (explorationEncounters.length > 0) {
+            console.log(
+                `Discovered ${explorationEncounters.length} encounters at (${heroX.toFixed(0)}, ${heroY.toFixed(0)})`
+            );
+            newEncounters.push(...explorationEncounters);
         }
 
         // Update existing encounters
@@ -205,34 +215,76 @@ export class EncounterSystem {
     }
 
     /**
-     * Check for potential encounters at hero position
+     * Check for exploration-based encounters when hero enters new areas
      */
-    private checkForEncounters(heroX: number, heroY: number): Encounter[] {
+    private checkExplorationEncounters(heroX: number, heroY: number): Encounter[] {
         const newEncounters: Encounter[] = [];
 
-        console.log(`Checking for encounters in ${this.encounterZones.length} zones`);
+        // Track hero movement and exploration distance
+        if (this.lastHeroPosition) {
+            const distance = Math.sqrt(
+                Math.pow(heroX - this.lastHeroPosition.x, 2) +
+                    Math.pow(heroY - this.lastHeroPosition.y, 2)
+            );
+            this.explorationDistance += distance;
+        }
+
+        // Update last position
+        this.lastHeroPosition = { x: heroX, y: heroY };
+
+        // Convert position to grid coordinates for area tracking
+        const gridSize = 100; // 100x100 pixel exploration grid
+        const gridX = Math.floor(heroX / gridSize);
+        const gridY = Math.floor(heroY / gridSize);
+        const areaKey = `${gridX},${gridY}`;
+
+        // Check if this is a newly explored area
+        const isNewArea = !this.exploredAreas.has(areaKey);
+
+        if (isNewArea) {
+            this.exploredAreas.add(areaKey);
+            console.log(
+                `Exploring new area: ${areaKey} (${this.exploredAreas.size} total areas explored)`
+            );
+
+            // Check if we're in an encounter zone and potentially spawn encounter
+            const zoneEncounters = this.checkZoneDiscovery(heroX, heroY);
+            newEncounters.push(...zoneEncounters);
+        }
+
+        return newEncounters;
+    }
+
+    /**
+     * Check for encounters when discovering new areas within encounter zones
+     */
+    private checkZoneDiscovery(heroX: number, heroY: number): Encounter[] {
+        const newEncounters: Encounter[] = [];
 
         for (const zone of this.encounterZones) {
             const distance = Math.sqrt(
                 Math.pow(heroX - zone.centerX, 2) + Math.pow(heroY - zone.centerY, 2)
             );
 
+            // Check if hero is in this zone
             if (distance <= zone.radius) {
+                // Chance to discover encounter in this zone (based on exploration)
+                const baseChance = this.discoveryChance;
+                const zoneMultiplier = zone.density; // Higher density = more encounters
+                const encounterChance = baseChance * zoneMultiplier;
+
                 console.log(
-                    `Hero in zone! Distance: ${distance.toFixed(0)}, Zone: ${zone.centerX.toFixed(0)},${zone.centerY.toFixed(0)} (radius: ${zone.radius})`
+                    `In encounter zone! Distance: ${distance.toFixed(0)}, Discovery chance: ${(encounterChance * 100).toFixed(1)}%`
                 );
-
-                // Calculate encounter probability based on density and time since last check
-                const timeSinceLastCheck = this.worldTime - this.lastEncounterCheck;
-                const encounterChance = zone.density * timeSinceLastCheck * 10; // Increased for testing
-
-                console.log(`Encounter chance: ${(encounterChance * 100).toFixed(1)}%`);
 
                 if (Math.random() < encounterChance) {
                     const encounter = this.generateEncounter(zone, heroX, heroY);
                     if (encounter) {
                         newEncounters.push(encounter);
                         this.activeEncounters.set(encounter.id, encounter);
+                        console.log(
+                            `Encounter discovered: ${encounter.type} (${encounter.hostile ? 'hostile' : 'friendly'})`
+                        );
                     }
                 }
             }
@@ -248,9 +300,12 @@ export class EncounterSystem {
         const encounterType =
             zone.encounterTypes[Math.floor(Math.random() * zone.encounterTypes.length)];
 
-        // Add some randomness to position
+        // Position encounter in the discovered area, but not too close to hero
+        const minDistance = 30; // Minimum distance from hero
+        const maxDistance = 80; // Maximum distance from hero
         const angle = Math.random() * Math.PI * 2;
-        const distance = Math.random() * 50 + 20; // 20-70 units from hero
+        const distance = Math.random() * (maxDistance - minDistance) + minDistance;
+
         const x = heroX + Math.cos(angle) * distance;
         const y = heroY + Math.sin(angle) * distance;
 
@@ -383,6 +438,34 @@ export class EncounterSystem {
      */
     getTimeOfDay(): number {
         return this.worldTime % 24;
+    }
+
+    /**
+     * Save the current state of the encounter system for persistence
+     */
+    saveState(): EncounterSystemState {
+        return {
+            activeEncounters: Array.from(this.activeEncounters.entries()),
+            encounterZones: [...this.encounterZones],
+            worldTime: this.worldTime,
+            lastEncounterCheck: this.lastEncounterCheck,
+            exploredAreas: Array.from(this.exploredAreas),
+            lastHeroPosition: this.lastHeroPosition,
+            explorationDistance: this.explorationDistance,
+        };
+    }
+
+    /**
+     * Restore the encounter system state from saved data
+     */
+    restoreState(state: EncounterSystemState): void {
+        this.activeEncounters = new Map(state.activeEncounters);
+        this.encounterZones = [...state.encounterZones];
+        this.worldTime = state.worldTime;
+        this.lastEncounterCheck = state.lastEncounterCheck;
+        this.exploredAreas = new Set(state.exploredAreas);
+        this.lastHeroPosition = state.lastHeroPosition;
+        this.explorationDistance = state.explorationDistance;
     }
 }
 

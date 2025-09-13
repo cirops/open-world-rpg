@@ -31,6 +31,13 @@ export class Preloader extends Scene {
 
         this.load.image('logo', 'logo.png');
         this.load.image('star', 'star.png');
+
+        // Load medievalRTS spritesheet with XML atlas
+        this.load.atlasXML(
+            'medievalRTS',
+            'medievalRTS_spritesheet@2.png',
+            'medievalRTS_spritesheet@2.xml'
+        );
     }
 
     create() {

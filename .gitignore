@@ -30,3 +30,6 @@ coverage/
 # Build outputs
 build/
 *.tsbuildinfo
+
+# Documentation (kept local only)
+docs/

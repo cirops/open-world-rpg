@@ -17,15 +17,21 @@ const phasermsg = () => {
 };
 
 export default defineConfig({
+    root: '.',
     base: './',
-    plugins: [phasermsg()],
-    logLevel: 'warning',
+    publicDir: 'public',
     build: {
+        outDir: 'dist',
+        assetsDir: 'assets',
         rollupOptions: {
+            input: 'index.html',
             output: {
                 manualChunks: {
                     phaser: ['phaser'],
                 },
+                assetFileNames: 'assets/[name]-[hash][extname]',
+                chunkFileNames: 'assets/[name]-[hash].js',
+                entryFileNames: 'assets/[name]-[hash].js',
             },
         },
         minify: 'terser',
@@ -39,5 +45,7 @@ export default defineConfig({
             },
         },
     },
+    plugins: [phasermsg()],
+    logLevel: 'warning',
 });
 

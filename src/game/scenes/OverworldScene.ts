@@ -376,56 +376,56 @@ export class OverworldScene extends Scene {
         this.addEnvironmentalDecorations(worldWidth, worldHeight);
     }
 
-    private addBeachTiles(worldWidth: number, worldHeight: number): void {
-        const tileSize = 128;
-        const beachContainer = this.add.container(0, 0);
-        beachContainer.setDepth(-3);
+    // private addBeachTiles(worldWidth: number, worldHeight: number): void {
+    //     const tileSize = 128;
+    //     const beachContainer = this.add.container(0, 0);
+    //     beachContainer.setDepth(-3);
 
-        // Beach tiles along edges
-        const beachTiles = ['medievalTile_09.png', 'medievalTile_11.png', 'medievalTile_12.png']; // Sand/beach tiles
+    //     // Beach tiles along edges
+    //     const beachTiles = ['medievalTile_09.png', 'medievalTile_11.png', 'medievalTile_12.png']; // Sand/beach tiles
 
-        // Top beach
-        for (let x = 0; x < worldWidth; x += tileSize) {
-            const tileKey = Phaser.Utils.Array.GetRandom(beachTiles);
-            const tile = this.add.sprite(x + tileSize / 2, -tileSize / 2, 'medievalRTS', tileKey);
-            tile.setScale(1);
-            beachContainer.add(tile);
-        }
+    //     // Top beach
+    //     for (let x = 0; x < worldWidth; x += tileSize) {
+    //         const tileKey = Phaser.Utils.Array.GetRandom(beachTiles);
+    //         const tile = this.add.sprite(x + tileSize / 2, -tileSize / 2, 'medievalRTS', tileKey);
+    //         tile.setScale(1);
+    //         beachContainer.add(tile);
+    //     }
 
-        // Bottom beach
-        for (let x = 0; x < worldWidth; x += tileSize) {
-            const tileKey = Phaser.Utils.Array.GetRandom(beachTiles);
-            const tile = this.add.sprite(
-                x + tileSize / 2,
-                worldHeight + tileSize / 2,
-                'medievalRTS',
-                tileKey
-            );
-            tile.setScale(1);
-            beachContainer.add(tile);
-        }
+    //     // Bottom beach
+    //     for (let x = 0; x < worldWidth; x += tileSize) {
+    //         const tileKey = Phaser.Utils.Array.GetRandom(beachTiles);
+    //         const tile = this.add.sprite(
+    //             x + tileSize / 2,
+    //             worldHeight + tileSize / 2,
+    //             'medievalRTS',
+    //             tileKey
+    //         );
+    //         tile.setScale(1);
+    //         beachContainer.add(tile);
+    //     }
 
-        // Left beach
-        for (let y = 0; y < worldHeight; y += tileSize) {
-            const tileKey = Phaser.Utils.Array.GetRandom(beachTiles);
-            const tile = this.add.sprite(-tileSize / 2, y + tileSize / 2, 'medievalRTS', tileKey);
-            tile.setScale(1);
-            beachContainer.add(tile);
-        }
+    //     // Left beach
+    //     for (let y = 0; y < worldHeight; y += tileSize) {
+    //         const tileKey = Phaser.Utils.Array.GetRandom(beachTiles);
+    //         const tile = this.add.sprite(-tileSize / 2, y + tileSize / 2, 'medievalRTS', tileKey);
+    //         tile.setScale(1);
+    //         beachContainer.add(tile);
+    //     }
 
-        // Right beach
-        for (let y = 0; y < worldHeight; y += tileSize) {
-            const tileKey = Phaser.Utils.Array.GetRandom(beachTiles);
-            const tile = this.add.sprite(
-                worldWidth + tileSize / 2,
-                y + tileSize / 2,
-                'medievalRTS',
-                tileKey
-            );
-            tile.setScale(1);
-            beachContainer.add(tile);
-        }
-    }
+    //     // Right beach
+    //     for (let y = 0; y < worldHeight; y += tileSize) {
+    //         const tileKey = Phaser.Utils.Array.GetRandom(beachTiles);
+    //         const tile = this.add.sprite(
+    //             worldWidth + tileSize / 2,
+    //             y + tileSize / 2,
+    //             'medievalRTS',
+    //             tileKey
+    //         );
+    //         tile.setScale(1);
+    //         beachContainer.add(tile);
+    //     }
+    // }
 
     private addEnvironmentalDecorations(_worldWidth: number, _worldHeight: number): void {
         // Clean terrain - no additional decorations to keep it simple and clean

@@ -33,7 +33,7 @@ export class MainMenu extends Scene {
                     '╚══════════════════════════════════════════════════════════╝',
                 ],
                 {
-                    fontFamily: 'Courier New',
+                    fontFamily: 'monospace',
                     fontSize: 16,
                     color: '#8B4513',
                     align: 'center',
@@ -44,7 +44,7 @@ export class MainMenu extends Scene {
         // Subtitle with criminal undertones
         this.add
             .text(512, 200, 'Where contracts are made in darkness...', {
-                fontFamily: 'Times New Roman',
+                fontFamily: 'serif',
                 fontSize: 18,
                 color: '#CD853F',
                 align: 'center',
@@ -63,7 +63,7 @@ export class MainMenu extends Scene {
         // Add debug overlay
         this.add
             .text(10, 10, `Debug: ${GAME_NAME} v${GAME_VERSION}`, {
-                fontFamily: 'Courier New',
+                fontFamily: 'monospace',
                 fontSize: 12,
                 color: '#666666',
                 backgroundColor: '#000000',
@@ -74,7 +74,7 @@ export class MainMenu extends Scene {
         // Add navigation hint
         this.add
             .text(512, 700, 'Use ↑↓ to navigate • ENTER to select', {
-                fontFamily: 'Courier New',
+                fontFamily: 'monospace',
                 fontSize: 14,
                 color: '#8B7355',
                 align: 'center',
@@ -89,13 +89,19 @@ export class MainMenu extends Scene {
         this.menuOptions.forEach((option, index) => {
             const menuItem = this.add
                 .text(512, startY + index * spacing, `   ${option}`, {
-                    fontFamily: 'Courier New',
+                    fontFamily: 'monospace',
                     fontSize: 20,
-                    color: index === 0 ? '#FFD700' : '#8B7355',
                     align: 'center',
                 })
                 .setOrigin(0.5)
                 .setInteractive();
+
+            // Set initial color
+            try {
+                menuItem.setColor(index === 0 ? '#FFD700' : '#8B7355');
+            } catch (error) {
+                console.warn('Error setting initial menu item color:', error);
+            }
 
             // Add hover effects
             menuItem.on('pointerover', () => {
@@ -104,7 +110,11 @@ export class MainMenu extends Scene {
 
             menuItem.on('pointerout', () => {
                 if (this.selectedIndex !== index) {
-                    menuItem.setColor('#8B7355');
+                    try {
+                        menuItem.setColor('#8B7355');
+                    } catch (error) {
+                        console.warn('Error setting menu item color on pointerout:', error);
+                    }
                 }
             });
 
@@ -136,12 +146,16 @@ export class MainMenu extends Scene {
 
     updateSelection() {
         this.menuItems.forEach((item, index) => {
-            if (index === this.selectedIndex) {
-                item.setColor('#FFD700');
-                item.setText(`► ${this.menuOptions[index]} ◄`);
-            } else {
-                item.setColor('#8B7355');
-                item.setText(`   ${this.menuOptions[index]}`);
+            try {
+                if (index === this.selectedIndex) {
+                    item.setColor('#FFD700');
+                    item.setText(`► ${this.menuOptions[index]} ◄`);
+                } else {
+                    item.setColor('#8B7355');
+                    item.setText(`   ${this.menuOptions[index]}`);
+                }
+            } catch (error) {
+                console.warn('Error updating menu item color:', error);
             }
         });
     }
@@ -152,7 +166,7 @@ export class MainMenu extends Scene {
         switch (this.selectedIndex) {
             case 0: // New Game
                 console.log('Starting new game...');
-                this.scene.start('HeroGameScene');
+                this.scene.start('OverworldScene');
                 break;
             case 1: // Load Game
                 console.log('Loading saved game...');

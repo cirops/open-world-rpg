@@ -7,11 +7,21 @@ export class OverworldScene extends Scene {
     private worldGen: WorldGenerator;
     private encounterSystem: EncounterSystem;
     private worldData?: WorldSeed;
-    private poiSprites: Map<string, Phaser.GameObjects.Sprite> = new Map();
+    private poiGraphics: Map<string, Phaser.GameObjects.Graphics> = new Map();
     private encounterSprites: Map<string, Phaser.GameObjects.Sprite> = new Map();
+    private encounterGraphics: Map<string, Phaser.GameObjects.Graphics> = new Map();
     private debugText?: Phaser.GameObjects.Text;
     private worldTimeText?: Phaser.GameObjects.Text;
     private keys: { [key: string]: Phaser.Input.Keyboard.Key } = {};
+    private poiLabels: Map<string, Phaser.GameObjects.Text> = new Map();
+    private heroIndicator?: Phaser.GameObjects.Arc;
+
+    private readonly poiColors = {
+        town: 0xffd700, // Gold
+        manor: 0x8b4513, // Saddle brown
+        camp: 0x228b22, // Forest green
+        keep: 0x696969, // Dim gray
+    };
 
     constructor() {
         super('OverworldScene');
@@ -20,6 +30,11 @@ export class OverworldScene extends Scene {
     }
 
     create() {
+        console.log('🎮 OVERWORLD SCENE LOADING...');
+
+        // Set up camera bounds for larger world (no physics needed for overworld)
+        this.cameras.main.setBounds(0, 0, 2000, 1500);
+
         // Set up world background
         this.cameras.main.setBackgroundColor('#2d5a27'); // Dark forest green
 
@@ -27,10 +42,43 @@ export class OverworldScene extends Scene {
         this.worldData = this.worldGen.generateWorld(2000, 1500);
         this.encounterSystem.updateZonesForPOIs(this.worldData.pois);
 
+        console.log(`✅ Generated world with ${this.worldData.pois.length} POIs`);
+        console.log(
+            '🎯 POIs:',
+            this.worldData.pois
+                .map((poi) => `${poi.name} (${poi.type}) at ${poi.x},${poi.y}`)
+                .join('\n   ')
+        );
+
         // Create hero sprite
         this.heroSprite = this.add.image(1000, 750, 'star');
         this.heroSprite.setScale(0.5);
         this.cameras.main.startFollow(this.heroSprite);
+
+        // Make camera follow with some dead zone for better exploration
+        this.cameras.main.setDeadzone(100, 100);
+
+        // Add immediate visual confirmation
+        const loadingText = this.add.text(
+            512,
+            300,
+            '🚀 OVERWORLD LOADED!\n🎯 POIs should be visible\n🎮 Use WASD to move',
+            {
+                fontFamily: 'monospace',
+                fontSize: 24,
+                color: '#FFD700',
+                align: 'center',
+                backgroundColor: '#000000',
+                padding: { x: 20, y: 10 },
+            }
+        );
+        loadingText.setOrigin(0.5);
+        loadingText.setDepth(100);
+
+        // Remove loading text after 3 seconds
+        this.time.delayedCall(3000, () => {
+            loadingText.destroy();
+        });
 
         // Set up WASD movement keys
         this.keys = this.input.keyboard!.addKeys({
@@ -67,30 +115,36 @@ export class OverworldScene extends Scene {
     private createPOISprites(): void {
         if (!this.worldData) return;
 
-        const poiColors = {
-            town: 0xffd700, // Gold
-            manor: 0x8b4513, // Saddle brown
-            camp: 0x228b22, // Forest green
-            keep: 0x696969, // Dim gray
-        };
-
         this.worldData.pois.forEach((poi) => {
-            const sprite = this.add.sprite(poi.x, poi.y, '');
-            sprite.setTint(poiColors[poi.type]);
-            sprite.setScale(0.8);
+            console.log(`Creating POI: ${poi.name} at (${poi.x}, ${poi.y})`);
 
-            // Create a simple shape for the POI
+            // Create a simple shape for the POI using graphics only
             const graphics = this.add.graphics();
-            graphics.fillStyle(poiColors[poi.type]);
+            graphics.fillStyle(this.poiColors[poi.type]);
             graphics.fillCircle(poi.x, poi.y, 15);
             graphics.lineStyle(2, 0xffffff);
             graphics.strokeCircle(poi.x, poi.y, 15);
+
+            // Add a text label for the POI
+            const label = this.add.text(poi.x, poi.y - 25, poi.name, {
+                fontFamily: 'monospace',
+                fontSize: 10,
+                color: '#ffffff',
+                backgroundColor: '#000000',
+                padding: { x: 3, y: 2 },
+            });
+            label.setOrigin(0.5);
+            label.setDepth(10); // Ensure labels are visible above other elements
+
+            // Ensure graphics are visible
+            graphics.setDepth(5);
 
             // Make POI interactive
             const hitArea = new Phaser.Geom.Circle(poi.x, poi.y, 20);
             graphics.setInteractive(hitArea, Phaser.Geom.Circle.Contains);
 
             graphics.on('pointerdown', () => {
+                console.log(`POI clicked: ${poi.name}`);
                 this.onPOIClick(poi);
             });
 
@@ -98,26 +152,90 @@ export class OverworldScene extends Scene {
                 graphics.clear();
                 graphics.fillStyle(0xffffff);
                 graphics.fillCircle(poi.x, poi.y, 17);
-                graphics.lineStyle(3, poiColors[poi.type]);
+                graphics.lineStyle(3, this.poiColors[poi.type]);
                 graphics.strokeCircle(poi.x, poi.y, 17);
             });
 
             graphics.on('pointerout', () => {
                 graphics.clear();
-                graphics.fillStyle(poiColors[poi.type]);
+                graphics.fillStyle(this.poiColors[poi.type]);
                 graphics.fillCircle(poi.x, poi.y, 15);
                 graphics.lineStyle(2, 0xffffff);
                 graphics.strokeCircle(poi.x, poi.y, 15);
             });
 
-            this.poiSprites.set(poi.id, sprite);
+            this.poiGraphics.set(poi.id, graphics);
+
+            // Store label for cleanup
+            this.poiLabels.set(poi.id, label);
         });
+
+        // Add mini-map style POI indicators for debugging
+        this.addMiniMapIndicators();
+    }
+
+    private addMiniMapIndicators() {
+        if (!this.worldData) return;
+
+        // Create small indicators in the top-right corner showing POI positions
+        const miniMapX = 900;
+        const miniMapY = 50;
+        const scale = 0.1; // Scale down the world coordinates
+
+        this.worldData.pois.forEach((poi) => {
+            const indicatorX = miniMapX + poi.x * scale;
+            const indicatorY = miniMapY + poi.y * scale;
+
+            // Small dot for each POI
+            const indicator = this.add.circle(indicatorX, indicatorY, 3, this.poiColors[poi.type]);
+            indicator.setDepth(15);
+
+            // POI type letter
+            const typeLetter = poi.type.charAt(0).toUpperCase();
+            const typeText = this.add.text(indicatorX, indicatorY, typeLetter, {
+                fontFamily: 'monospace',
+                fontSize: 8,
+                color: '#ffffff',
+            });
+            typeText.setOrigin(0.5);
+            typeText.setDepth(16);
+        });
+
+        // Add mini-map border
+        this.add.rectangle(miniMapX + 50, miniMapY + 75, 120, 170).setStrokeStyle(2, 0xffffff);
+        this.add
+            .text(miniMapX + 50, miniMapY - 10, 'MINI-MAP', {
+                fontFamily: 'monospace',
+                fontSize: 10,
+                color: '#ffffff',
+            })
+            .setOrigin(0.5);
+
+        // Add hero position indicator (yellow dot)
+        this.heroIndicator = this.add.circle(0, 0, 4, 0xffff00);
+        this.heroIndicator.setDepth(20);
+
+        // Update hero indicator position initially
+        this.updateHeroIndicator();
+    }
+
+    private updateHeroIndicator() {
+        if (!this.heroSprite || !this.heroIndicator) return;
+
+        const miniMapX = 900;
+        const miniMapY = 50;
+        const scale = 0.1;
+
+        const indicatorX = miniMapX + this.heroSprite.x * scale;
+        const indicatorY = miniMapY + this.heroSprite.y * scale;
+
+        this.heroIndicator.setPosition(indicatorX, indicatorY);
     }
 
     private createDebugUI(): void {
         // Debug info text
         this.debugText = this.add.text(10, 10, '', {
-            fontFamily: 'Courier New',
+            fontFamily: 'monospace',
             fontSize: 12,
             color: '#ffffff',
             backgroundColor: '#000000',
@@ -127,7 +245,7 @@ export class OverworldScene extends Scene {
 
         // World time display
         this.worldTimeText = this.add.text(10, 40, '', {
-            fontFamily: 'Courier New',
+            fontFamily: 'monospace',
             fontSize: 12,
             color: '#ffff00',
             backgroundColor: '#000000',
@@ -159,14 +277,19 @@ export class OverworldScene extends Scene {
             moved = true;
         }
 
-        // Update debug info
+        // Update debug info and mini-map
         if (moved) {
             this.updateDebugInfo();
+            this.updateHeroIndicator();
         }
     };
 
     private updateEncounters = (): void => {
         if (!this.heroSprite) return;
+
+        console.log(
+            `Updating encounters - Hero at (${this.heroSprite.x.toFixed(0)}, ${this.heroSprite.y.toFixed(0)})`
+        );
 
         const newEncounters = this.encounterSystem.update(
             1000,
@@ -174,8 +297,13 @@ export class OverworldScene extends Scene {
             this.heroSprite.y
         );
 
+        console.log(`Active encounters: ${this.encounterSystem.getActiveEncounters().length}`);
+
         // Handle new encounters
         newEncounters.forEach((encounter) => {
+            console.log(
+                `New encounter: ${encounter.type} at (${encounter.x.toFixed(0)}, ${encounter.y.toFixed(0)})`
+            );
             this.createEncounterSprite(encounter);
         });
 
@@ -195,11 +323,13 @@ export class OverworldScene extends Scene {
         graphics.strokeCircle(encounter.x, encounter.y, 8);
 
         this.encounterSprites.set(encounter.id, sprite);
+        this.encounterGraphics.set(encounter.id, graphics);
 
         // Auto-remove encounter after 30 seconds
         this.time.delayedCall(30000, () => {
             graphics.destroy();
             this.encounterSprites.delete(encounter.id);
+            this.encounterGraphics.delete(encounter.id);
             this.encounterSystem.removeEncounter(encounter.id);
         });
     }

@@ -20,6 +20,7 @@
         "build-nolog": "vite build --config vite/config.prod.mjs",
         "lint": "eslint src --ext .ts,.tsx",
         "lint:fix": "eslint src --ext .ts,.tsx --fix",
+        "lint:full": "eslint src --ext .ts,.tsx && tsc --noEmit",
         "format": "prettier --write src/**/*.{ts,tsx}",
         "type-check": "tsc --noEmit",
         "test": "jest",
@@ -31,6 +32,7 @@
     },
     "devDependencies": {
         "@eslint/js": "^9.22.0",
+        "@playwright/test": "^1.55.0",
         "@types/jest": "^29.5.14",
         "eslint": "^9.22.0",
         "globals": "^16.0.0",

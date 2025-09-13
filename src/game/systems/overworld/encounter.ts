@@ -185,9 +185,15 @@ export class EncounterSystem {
 
         const newEncounters: Encounter[] = [];
 
-        // Check for new encounters every 5 minutes
-        if (this.worldTime - this.lastEncounterCheck > 5 / 60) {
+        // Check for new encounters every 5 seconds (for testing)
+        if (this.worldTime - this.lastEncounterCheck > 5 / 3600) {
+            // 5 seconds in hours
             const encounters = this.checkForEncounters(heroX, heroY);
+            if (encounters.length > 0) {
+                console.log(
+                    `Spawned ${encounters.length} encounters at hero position (${heroX.toFixed(0)}, ${heroY.toFixed(0)})`
+                );
+            }
             newEncounters.push(...encounters);
             this.lastEncounterCheck = this.worldTime;
         }
@@ -204,15 +210,23 @@ export class EncounterSystem {
     private checkForEncounters(heroX: number, heroY: number): Encounter[] {
         const newEncounters: Encounter[] = [];
 
+        console.log(`Checking for encounters in ${this.encounterZones.length} zones`);
+
         for (const zone of this.encounterZones) {
             const distance = Math.sqrt(
                 Math.pow(heroX - zone.centerX, 2) + Math.pow(heroY - zone.centerY, 2)
             );
 
             if (distance <= zone.radius) {
+                console.log(
+                    `Hero in zone! Distance: ${distance.toFixed(0)}, Zone: ${zone.centerX.toFixed(0)},${zone.centerY.toFixed(0)} (radius: ${zone.radius})`
+                );
+
                 // Calculate encounter probability based on density and time since last check
                 const timeSinceLastCheck = this.worldTime - this.lastEncounterCheck;
-                const encounterChance = zone.density * timeSinceLastCheck;
+                const encounterChance = zone.density * timeSinceLastCheck * 10; // Increased for testing
+
+                console.log(`Encounter chance: ${(encounterChance * 100).toFixed(1)}%`);
 
                 if (Math.random() < encounterChance) {
                     const encounter = this.generateEncounter(zone, heroX, heroY);

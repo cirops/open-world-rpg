@@ -3,7 +3,6 @@ import { POI } from '../systems/overworld/worldGen';
 
 export class POIInterior extends Scene {
     private poi?: POI;
-    private background?: Phaser.GameObjects.Rectangle;
     private titleText?: Phaser.GameObjects.Text;
     private descriptionText?: Phaser.GameObjects.Text;
     private exitButton?: Phaser.GameObjects.Text;
@@ -47,7 +46,7 @@ export class POIInterior extends Scene {
 
         const bgColor = backgroundColors[this.poi!.type] || 0x2d5a27;
 
-        this.background = this.add.rectangle(512, 384, 1024, 768, bgColor);
+        this.add.rectangle(512, 384, 1024, 768, bgColor);
 
         // Add some decorative elements based on POI type
         this.addDecorativeElements();
@@ -93,7 +92,7 @@ export class POIInterior extends Scene {
     private createPOIInfo(): void {
         // Title
         this.titleText = this.add.text(512, 100, this.poi!.name, {
-            fontFamily: 'Times New Roman',
+            fontFamily: 'serif',
             fontSize: 32,
             color: '#FFD700',
             align: 'center',
@@ -102,7 +101,7 @@ export class POIInterior extends Scene {
 
         // Type indicator
         const typeText = this.add.text(512, 140, `(${this.poi!.type.toUpperCase()})`, {
-            fontFamily: 'Courier New',
+            fontFamily: 'monospace',
             fontSize: 16,
             color: '#C0C0C0',
             align: 'center',
@@ -111,7 +110,7 @@ export class POIInterior extends Scene {
 
         // Description
         this.descriptionText = this.add.text(512, 200, this.poi!.description, {
-            fontFamily: 'Times New Roman',
+            fontFamily: 'serif',
             fontSize: 18,
             color: '#F5F5DC',
             align: 'center',
@@ -125,7 +124,7 @@ export class POIInterior extends Scene {
 
         this.add
             .text(512, 280, `Status: ${statusText}`, {
-                fontFamily: 'Courier New',
+                fontFamily: 'monospace',
                 fontSize: 14,
                 color: statusColor,
                 align: 'center',
@@ -135,7 +134,7 @@ export class POIInterior extends Scene {
 
     private createExitButton(): void {
         this.exitButton = this.add.text(512, 600, 'Press ESC or E to Exit', {
-            fontFamily: 'Courier New',
+            fontFamily: 'monospace',
             fontSize: 16,
             color: '#FFFFFF',
             backgroundColor: '#000000',

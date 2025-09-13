@@ -16,6 +16,7 @@
     "scripts": {
         "dev": "node log.js dev & vite --config vite/config.dev.mjs",
         "build": "node log.js build & vite build --config vite/config.prod.mjs",
+        "build:gh-pages": "npm run build && sed -i 's|src=\"/assets/|src=\"./assets/|g' dist/index.html && touch dist/.nojekyll",
         "dev-nolog": "vite --config vite/config.dev.mjs",
         "build-nolog": "vite build --config vite/config.prod.mjs",
         "lint": "eslint src --ext .ts,.tsx",

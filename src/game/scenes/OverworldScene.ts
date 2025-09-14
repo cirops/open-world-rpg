@@ -1,6 +1,7 @@
 import { Scene } from 'phaser';
 import { WorldGenerator, WorldSeed, POI } from '../systems/overworld/worldGen';
 import { EncounterSystem, Encounter, EncounterSystemState } from '../systems/overworld/encounter';
+import { ExplorationSystem, ExplorationState } from '../systems/overworld/exploration';
 
 interface WorldBoundaries {
     left: number;
@@ -21,6 +22,7 @@ export class OverworldScene extends Scene {
     private heroSprite?: Phaser.GameObjects.Sprite;
     private worldGen: WorldGenerator;
     private encounterSystem: EncounterSystem;
+    private explorationSystem: ExplorationSystem;
     private worldData?: WorldSeed;
     private poiSprites: Map<string, Phaser.GameObjects.Sprite> = new Map();
     private encounterSprites: Map<string, Phaser.GameObjects.Sprite> = new Map();
@@ -32,6 +34,7 @@ export class OverworldScene extends Scene {
     private miniMapContainer?: MiniMapContainer;
     private miniMapBorder?: Phaser.GameObjects.Rectangle;
     private miniMapTitle?: Phaser.GameObjects.Text;
+    private fogContainer?: Phaser.GameObjects.Container;
 
     // Centralized boundary system
     private playField: WorldBoundaries;
@@ -47,6 +50,7 @@ export class OverworldScene extends Scene {
         super('OverworldScene');
         this.worldGen = new WorldGenerator(12345); // Fixed seed for consistent world
         this.encounterSystem = new EncounterSystem();
+        this.explorationSystem = new ExplorationSystem(150); // 150px exploration radius
 
         // Initialize play field boundaries - will be calculated precisely on create()
         this.playField = { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
@@ -208,6 +212,7 @@ export class OverworldScene extends Scene {
         heroPosition?: { x: number; y: number };
         worldData?: WorldSeed;
         encounterState?: EncounterSystemState;
+        explorationState?: ExplorationState;
     }) {
         console.log('🎮 OVERWORLD SCENE LOADING...');
 
@@ -229,6 +234,9 @@ export class OverworldScene extends Scene {
         // Create ocean background
         this.createOceanBackground(worldWidth, worldHeight, oceanPadding);
 
+        // Create fog-of-war system
+        this.createFogOfWar(worldWidth, worldHeight, oceanPadding);
+
         // Check if we have existing world data (returning from POI)
         if (data?.worldData) {
             console.log('🔄 Reusing existing world data...');
@@ -238,6 +246,12 @@ export class OverworldScene extends Scene {
             if (data.encounterState) {
                 console.log('🔄 Restoring encounter system state...');
                 this.encounterSystem.restoreState(data.encounterState);
+            }
+
+            // Restore exploration system state if provided
+            if (data.explorationState) {
+                console.log('🔄 Restoring exploration system state...');
+                this.explorationSystem.restoreState(data.explorationState);
             }
         } else {
             console.log('🆕 Generating new world...');
@@ -279,6 +293,10 @@ export class OverworldScene extends Scene {
 
         // Make camera follow with some dead zone for better exploration
         this.cameras.main.setDeadzone(100, 100);
+
+        // Initialize exploration around hero position
+        this.explorationSystem.exploreArea(clampedPosition.x, clampedPosition.y);
+        this.updateFogOfWar();
 
         // Add immediate visual confirmation
         const loadingText = this.add.text(
@@ -342,6 +360,17 @@ export class OverworldScene extends Scene {
 
         this.worldData.pois.forEach((poi) => {
             console.log(`Creating POI: ${poi.name} at (${poi.x}, ${poi.y})`);
+
+            // Only create sprites for POIs that are either discovered or in explored areas
+            const isInExploredArea = this.explorationSystem.isExplored(poi.x, poi.y);
+            const shouldShow = poi.discovered || isInExploredArea;
+
+            if (!shouldShow) {
+                console.log(
+                    `POI ${poi.name} is not yet discovered or in explored area - not rendering`
+                );
+                return;
+            }
 
             // Get appropriate sprite for POI type
             const spriteKey = this.getPOISpriteKey(poi.type);
@@ -452,7 +481,13 @@ export class OverworldScene extends Scene {
         this.miniMapContainer.playFieldLeft = this.playField.left;
         this.miniMapContainer.playFieldTop = this.playField.top;
 
+        // Only show POIs that are discovered or in explored areas on the minimap
         this.worldData.pois.forEach((poi) => {
+            const isInExploredArea = this.explorationSystem.isExplored(poi.x, poi.y);
+            const shouldShowOnMap = poi.discovered || isInExploredArea;
+
+            if (!shouldShowOnMap) return;
+
             // Convert world coordinates to minimap coordinates (relative to playfield bounds)
             const relativeX = poi.x - this.playField.left;
             const relativeY = poi.y - this.playField.top;
@@ -500,6 +535,55 @@ export class OverworldScene extends Scene {
 
         // Update hero indicator position initially
         this.updateHeroIndicator();
+    }
+
+    private refreshMiniMap(): void {
+        if (!this.miniMapContainer || !this.worldData) return;
+
+        // Clear existing POI indicators (but keep border, title, and hero indicator)
+        const childrenToKeep = [this.miniMapBorder, this.miniMapTitle, this.heroIndicator].filter(
+            Boolean
+        );
+        const childrenToRemove: Phaser.GameObjects.GameObject[] = [];
+
+        this.miniMapContainer.each((child: Phaser.GameObjects.GameObject) => {
+            if (!childrenToKeep.some((keep) => keep === child)) {
+                childrenToRemove.push(child);
+            }
+        });
+
+        childrenToRemove.forEach((child) => child.destroy());
+
+        // Re-add POI indicators for newly discovered/explored areas
+        const playfieldWidth = this.playField.width;
+        const scale = this.miniMapContainer.mapScale || 120 / playfieldWidth;
+
+        this.worldData.pois.forEach((poi) => {
+            const isInExploredArea = this.explorationSystem.isExplored(poi.x, poi.y);
+            const shouldShowOnMap = poi.discovered || isInExploredArea;
+
+            if (!shouldShowOnMap) return;
+
+            // Convert world coordinates to minimap coordinates (relative to playfield bounds)
+            const relativeX = poi.x - this.playField.left;
+            const relativeY = poi.y - this.playField.top;
+            const indicatorX = relativeX * scale;
+            const indicatorY = relativeY * scale;
+
+            // Small dot for each POI
+            const indicator = this.add.circle(indicatorX, indicatorY, 3, this.poiColors[poi.type]);
+            this.miniMapContainer!.add(indicator);
+
+            // POI type letter
+            const typeLetter = poi.type.charAt(0).toUpperCase();
+            const typeText = this.add.text(indicatorX, indicatorY, typeLetter, {
+                fontFamily: 'monospace',
+                fontSize: 8,
+                color: '#ffffff',
+            });
+            typeText.setOrigin(0.5);
+            this.miniMapContainer!.add(typeText);
+        });
     }
 
     private createOceanBackground(
@@ -648,6 +732,74 @@ export class OverworldScene extends Scene {
         // Just the ocean, grass tiles, POIs, and encounters
     }
 
+    private createFogOfWar(worldWidth: number, worldHeight: number, oceanPadding: number): void {
+        // Create a container for fog-of-war elements
+        this.fogContainer = this.add.container(0, 0);
+        this.fogContainer.setDepth(50); // Above terrain but below POIs and encounters
+
+        // Initially cover entire world with opaque grey fog
+        const fogBackground = this.add.rectangle(
+            -oceanPadding + worldWidth / 2,
+            -oceanPadding + worldHeight / 2,
+            worldWidth + oceanPadding * 2,
+            worldHeight + oceanPadding * 2,
+            0x666666, // Dark grey color
+            1.0 // Completely opaque
+        );
+        this.fogContainer.add(fogBackground);
+    }
+
+    private updateFogOfWar(): void {
+        if (!this.fogContainer) return;
+
+        // Clear existing fog
+        this.fogContainer.removeAll(true);
+
+        // Get world dimensions
+        const worldWidth = 16 * 128;
+        const worldHeight = 12 * 128;
+        const oceanPadding = 300;
+        const gridSize = 50; // Match the exploration grid size
+
+        // Create a set of all possible grid cells in the world
+        const allCells = new Set<string>();
+        const startX = -oceanPadding;
+        const startY = -oceanPadding;
+        const endX = worldWidth + oceanPadding;
+        const endY = worldHeight + oceanPadding;
+
+        for (let x = startX; x < endX; x += gridSize) {
+            for (let y = startY; y < endY; y += gridSize) {
+                const gridX = Math.floor(x / gridSize);
+                const gridY = Math.floor(y / gridSize);
+                allCells.add(`${gridX},${gridY}`);
+            }
+        }
+
+        // Get explored cells
+        const exploredCellsSet = this.explorationSystem.getExploredCellKeys();
+
+        // Create fog rectangles only for unexplored cells
+        allCells.forEach((cellKey) => {
+            if (!exploredCellsSet.has(cellKey)) {
+                const [gridX, gridY] = cellKey.split(',').map(Number);
+                const worldX = gridX * gridSize + gridSize / 2;
+                const worldY = gridY * gridSize + gridSize / 2;
+
+                // Create opaque grey rectangle covering this unexplored cell
+                const fogRect = this.add.rectangle(
+                    worldX,
+                    worldY,
+                    gridSize,
+                    gridSize,
+                    0x666666, // Dark grey
+                    1.0 // Completely opaque
+                );
+                this.fogContainer!.add(fogRect);
+            }
+        });
+    }
+
     private updateHeroIndicator() {
         if (!this.heroSprite || !this.heroIndicator || !this.miniMapContainer) return;
 
@@ -703,6 +855,58 @@ export class OverworldScene extends Scene {
                 // Reset label to normal
                 label.setColor('#ffffff');
                 label.setText(poi.name);
+            }
+        });
+    }
+
+    private refreshPOIVisibility(): void {
+        if (!this.worldData) return;
+
+        // Check for POIs that should now be visible due to exploration
+        this.worldData.pois.forEach((poi) => {
+            const hasSprite = this.poiSprites.has(poi.id);
+            const isInExploredArea = this.explorationSystem.isExplored(poi.x, poi.y);
+            const shouldShow = poi.discovered || isInExploredArea;
+
+            if (shouldShow && !hasSprite) {
+                // POI should be visible but isn't - create it
+                console.log(`POI ${poi.name} is now in explored area - creating sprite`);
+
+                // Get appropriate sprite for POI type
+                const spriteKey = this.getPOISpriteKey(poi.type);
+                const sprite = this.add.sprite(poi.x, poi.y, 'medievalRTS', spriteKey);
+                sprite.setScale(0.6); // Scale down structures to fit better
+                sprite.setDepth(5);
+
+                // Add a text label for the POI
+                const label = this.add.text(poi.x, poi.y - 40, poi.name, {
+                    fontFamily: 'monospace',
+                    fontSize: 10,
+                    color: '#ffffff',
+                    backgroundColor: '#000000',
+                    padding: { x: 3, y: 2 },
+                });
+                label.setOrigin(0.5);
+                label.setDepth(10); // Ensure labels are visible above other elements
+
+                // Make POI interactive
+                sprite.setInteractive();
+
+                sprite.on('pointerdown', () => {
+                    console.log(`POI clicked: ${poi.name}`);
+                    this.onPOIClick(poi);
+                });
+
+                sprite.on('pointerover', () => {
+                    sprite.setTint(0xffffff); // Brighten on hover
+                });
+
+                sprite.on('pointerout', () => {
+                    sprite.clearTint(); // Remove tint on mouse out
+                });
+
+                this.poiSprites.set(poi.id, sprite);
+                this.poiLabels.set(poi.id, label);
             }
         });
     }
@@ -779,6 +983,14 @@ export class OverworldScene extends Scene {
 
         // Update debug info, mini-map, and POI visuals
         if (moved) {
+            // Explore new areas around the hero
+            this.explorationSystem.exploreArea(this.heroSprite!.x, this.heroSprite!.y);
+            this.updateFogOfWar();
+
+            // Check for newly visible POIs due to exploration
+            this.refreshPOIVisibility();
+            this.refreshMiniMap();
+
             this.updateDebugInfo();
             this.updateHeroIndicator();
             this.updatePOIVisuals();
@@ -800,12 +1012,16 @@ export class OverworldScene extends Scene {
 
         console.log(`Active encounters: ${this.encounterSystem.getActiveEncounters().length}`);
 
-        // Handle new encounters
+        // Handle new encounters (only create sprites for encounters in explored areas)
         newEncounters.forEach((encounter) => {
             console.log(
                 `New encounter: ${encounter.type} at (${encounter.x.toFixed(0)}, ${encounter.y.toFixed(0)})`
             );
-            this.createEncounterSprite(encounter);
+
+            // Only show encounters in explored areas
+            if (this.explorationSystem.isExplored(encounter.x, encounter.y)) {
+                this.createEncounterSprite(encounter);
+            }
         });
 
         // Update world time display
@@ -906,12 +1122,13 @@ export class OverworldScene extends Scene {
             this.worldData = this.worldGen.discoverPOI(this.worldData, poi.id);
         }
 
-        // Transition to POI interior scene with hero position, world data, and encounter state
+        // Transition to POI interior scene with hero position, world data, encounter state, and exploration state
         this.scene.start('POIInterior', {
             poi,
             heroPosition: { x: this.heroSprite.x, y: this.heroSprite.y },
             worldData: this.worldData,
             encounterState: this.encounterSystem.saveState(),
+            explorationState: this.explorationSystem.saveState(),
         });
     }
 
@@ -926,10 +1143,16 @@ export class OverworldScene extends Scene {
         );
         const activeEncounters = this.encounterSystem.getActiveEncounters();
 
+        const explorationCoverage = this.explorationSystem.getExplorationCoverage(
+            16 * 128,
+            12 * 128
+        );
+
         this.debugText.setText([
             `Hero: (${Math.round(this.heroSprite.x)}, ${Math.round(this.heroSprite.y)})`,
             `Nearby POIs: ${nearbyPOIs.length}`,
             `Active Encounters: ${activeEncounters.length}`,
+            `Explored: ${explorationCoverage.toFixed(1)}%`,
             `FPS: ${Math.round(this.game.loop.actualFps)}`,
         ]);
     }

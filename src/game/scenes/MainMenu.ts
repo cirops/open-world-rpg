@@ -1,11 +1,27 @@
 import { GameObjects, Scene } from 'phaser';
 import { GAME_NAME, GAME_VERSION } from '../constants';
 
+interface MenuButton {
+    background: GameObjects.Rectangle;
+    text: GameObjects.Text;
+    container: GameObjects.Container;
+}
+
 export class MainMenu extends Scene {
     background: GameObjects.Rectangle;
-    menuItems: GameObjects.Text[] = [];
+    menuButtons: MenuButton[] = [];
     selectedIndex = 0;
     menuOptions = ['New Game', 'Load Game', 'Memories', 'Options', 'Quit'];
+
+    // Button styling constants
+    private readonly BUTTON_WIDTH = 280;
+    private readonly BUTTON_HEIGHT = 50;
+    private readonly BUTTON_SPACING = 60;
+    private readonly NORMAL_COLOR = 0x4a4a4a;
+    private readonly HOVER_COLOR = 0x6a6a6a;
+    private readonly SELECTED_COLOR = 0xffd700;
+    private readonly TEXT_NORMAL_COLOR = '#D3D3D3';
+    private readonly TEXT_SELECTED_COLOR = '#000000';
 
     constructor() {
         super('MainMenu');
@@ -84,48 +100,63 @@ export class MainMenu extends Scene {
 
     createMenu() {
         const startY = 300;
-        const spacing = 50;
 
         this.menuOptions.forEach((option, index) => {
-            const menuItem = this.add
-                .text(512, startY + index * spacing, `   ${option}`, {
-                    fontFamily: 'monospace',
-                    fontSize: 20,
+            const buttonY = startY + index * this.BUTTON_SPACING;
+
+            // Create button background
+            const background = this.add.rectangle(
+                0,
+                0,
+                this.BUTTON_WIDTH,
+                this.BUTTON_HEIGHT,
+                this.NORMAL_COLOR,
+                0.8
+            );
+            background.setStrokeStyle(2, 0x8b4513);
+
+            // Create button text
+            const text = this.add
+                .text(0, 0, option, {
+                    fontFamily: 'serif',
+                    fontSize: 18,
+                    color: this.TEXT_NORMAL_COLOR,
                     align: 'center',
                 })
-                .setOrigin(0.5)
-                .setInteractive();
+                .setOrigin(0.5);
 
-            // Set initial color
-            try {
-                menuItem.setColor(index === 0 ? '#FFD700' : '#8B7355');
-            } catch (error) {
-                console.warn('Error setting initial menu item color:', error);
-            }
+            // Create container for the button
+            const container = this.add.container(512, buttonY, [background, text]);
+            container.setSize(this.BUTTON_WIDTH, this.BUTTON_HEIGHT);
+            container.setInteractive();
 
-            // Add hover effects
-            menuItem.on('pointerover', () => {
+            // Store the button components
+            const menuButton: MenuButton = {
+                background,
+                text,
+                container,
+            };
+
+            // Add event handlers
+            container.on('pointerover', () => {
                 this.selectMenuItem(index);
+                this.updateButtonHover(menuButton, true);
             });
 
-            menuItem.on('pointerout', () => {
+            container.on('pointerout', () => {
                 if (this.selectedIndex !== index) {
-                    try {
-                        menuItem.setColor('#8B7355');
-                    } catch (error) {
-                        console.warn('Error setting menu item color on pointerout:', error);
-                    }
+                    this.updateButtonHover(menuButton, false);
                 }
             });
 
-            menuItem.on('pointerdown', () => {
+            container.on('pointerdown', () => {
                 this.selectOption();
             });
 
-            this.menuItems.push(menuItem);
+            this.menuButtons.push(menuButton);
         });
 
-        // Add selection indicator
+        // Set initial selection
         this.updateSelection();
     }
 
@@ -145,19 +176,33 @@ export class MainMenu extends Scene {
     }
 
     updateSelection() {
-        this.menuItems.forEach((item, index) => {
-            try {
-                if (index === this.selectedIndex) {
-                    item.setColor('#FFD700');
-                    item.setText(`► ${this.menuOptions[index]} ◄`);
-                } else {
-                    item.setColor('#8B7355');
-                    item.setText(`   ${this.menuOptions[index]}`);
-                }
-            } catch (error) {
-                console.warn('Error updating menu item color:', error);
+        this.menuButtons.forEach((menuButton, index) => {
+            if (index === this.selectedIndex) {
+                this.updateButtonSelected(menuButton, true);
+            } else {
+                this.updateButtonSelected(menuButton, false);
             }
         });
+    }
+
+    updateButtonHover(menuButton: MenuButton, isHovered: boolean) {
+        if (isHovered) {
+            menuButton.background.setFillStyle(this.HOVER_COLOR);
+        } else {
+            menuButton.background.setFillStyle(this.NORMAL_COLOR);
+        }
+    }
+
+    updateButtonSelected(menuButton: MenuButton, isSelected: boolean) {
+        if (isSelected) {
+            menuButton.background.setFillStyle(this.SELECTED_COLOR);
+            menuButton.text.setColor(this.TEXT_SELECTED_COLOR);
+            menuButton.background.setStrokeStyle(3, 0xffa500);
+        } else {
+            menuButton.background.setFillStyle(this.NORMAL_COLOR);
+            menuButton.text.setColor(this.TEXT_NORMAL_COLOR);
+            menuButton.background.setStrokeStyle(2, 0x8b4513);
+        }
     }
 
     selectOption() {

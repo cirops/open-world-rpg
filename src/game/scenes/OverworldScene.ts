@@ -2,6 +2,15 @@ import { Scene } from 'phaser';
 import { WorldGenerator, WorldSeed, POI } from '../systems/overworld/worldGen';
 import { EncounterSystem, Encounter, EncounterSystemState } from '../systems/overworld/encounter';
 
+interface WorldBoundaries {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+    width: number;
+    height: number;
+}
+
 export class OverworldScene extends Scene {
     private heroSprite?: Phaser.GameObjects.Sprite;
     private worldGen: WorldGenerator;
@@ -18,6 +27,9 @@ export class OverworldScene extends Scene {
     private miniMapBorder?: Phaser.GameObjects.Rectangle;
     private miniMapTitle?: Phaser.GameObjects.Text;
 
+    // Centralized boundary system
+    private playField: WorldBoundaries;
+
     private readonly poiColors = {
         town: 0xffd700, // Gold
         manor: 0x8b4513, // Saddle brown
@@ -29,6 +41,161 @@ export class OverworldScene extends Scene {
         super('OverworldScene');
         this.worldGen = new WorldGenerator(12345); // Fixed seed for consistent world
         this.encounterSystem = new EncounterSystem();
+
+        // Initialize play field boundaries - will be calculated precisely on create()
+        this.playField = { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
+    }
+
+    /**
+     * Calculate precise playable boundaries based on tile system
+     * The playable area is where land tiles exist, ocean tiles are out of bounds
+     */
+    private calculatePlayField(): WorldBoundaries {
+        const TILE_SIZE = 128;
+        const HERO_COLLISION_RADIUS = 8;
+
+        // WORLD DIMENSIONS: Adjust to align perfectly with tile grid
+        // Original: 2000x1500 (15.625 x 11.71875 tiles - not aligned!)
+        // New: Ensure dimensions are exact multiples of TILE_SIZE
+        const TILES_HORIZONTAL = 16; // 16 tiles * 128 = 2048px
+        const TILES_VERTICAL = 12; // 12 tiles * 128 = 1536px
+
+        const WORLD_WIDTH = TILES_HORIZONTAL * TILE_SIZE; // 2048px
+        const WORLD_HEIGHT = TILES_VERTICAL * TILE_SIZE; // 1536px
+
+        // BOUNDARY ADJUSTMENT CONSTANTS (as fractions of TILE_SIZE)
+        // These values are derived from gameplay testing and user feedback
+        const WEST_INSET_RATIO = 0.75; // Move 3/4 tile inward from west edge
+        const EAST_EXTEND_RATIO = 0.65625; // Extend ~2/3 tile beyond last east tile
+        const NORTH_INSET_RATIO = 0.59375; // Move ~3/5 tile down from north edge
+        const SOUTH_EXTEND_RATIO = 0.57; // Extend 7/8 tile beyond last south tile (was 1.125, reduced by ~32px)
+
+        console.log(
+            `🗺️ WORLD DIMENSIONS: ${WORLD_WIDTH}x${WORLD_HEIGHT} (${TILES_HORIZONTAL}x${TILES_VERTICAL} tiles)`
+        );
+
+        // TILE GRID ANALYSIS:
+        // Land tiles are placed at grid positions: 0, 128, 256, 384, ..., up to worldWidth/Height
+        // Ocean tiles are placed at negative positions: -300, -172, -44, 84, etc.
+
+        // Calculate tile positions
+        const landTilePositionsX: number[] = [];
+        const landTilePositionsY: number[] = [];
+
+        for (let x = 0; x < WORLD_WIDTH; x += TILE_SIZE) {
+            landTilePositionsX.push(x);
+        }
+        for (let y = 0; y < WORLD_HEIGHT; y += TILE_SIZE) {
+            landTilePositionsY.push(y);
+        }
+
+        console.log(
+            `🎯 Land tiles X: [${landTilePositionsX.slice(0, 5).join(', ')}, ..., ${landTilePositionsX.slice(-2).join(', ')}]`
+        );
+        console.log(
+            `🎯 Land tiles Y: [${landTilePositionsY.slice(0, 5).join(', ')}, ..., ${landTilePositionsY.slice(-2).join(', ')}]`
+        );
+
+        // BOUNDARY CALCULATIONS: Derive from tile positions and gameplay requirements
+        // Based on feedback:
+        // - West: slightly left of one tile inward
+        // - East: one tile beyond last land tile
+        // - North: one tile down from edge
+        // - South: two tiles beyond last land tile
+
+        // West boundary: Inset from left edge by specified ratio
+        const firstLandTileX = landTilePositionsX[0]; // 0
+        const westAdjustment = TILE_SIZE * WEST_INSET_RATIO; // 128 * 0.75 = 96px
+        const leftBoundary = firstLandTileX + westAdjustment; // 0 + 96 = 96
+
+        // East boundary: Extend beyond last land tile by specified ratio
+        const lastLandTileX = landTilePositionsX[landTilePositionsX.length - 1]; // 1920 (for 2048px world)
+        const eastExtension = TILE_SIZE * EAST_EXTEND_RATIO; // 128 * 0.65625 = 84px
+        const rightBoundary = lastLandTileX + TILE_SIZE + eastExtension; // 1920 + 128 + 84 = 2132
+
+        // North boundary: Inset from top edge by specified ratio
+        const firstLandTileY = landTilePositionsY[0]; // 0
+        const northAdjustment = TILE_SIZE * NORTH_INSET_RATIO; // 128 * 0.59375 = 76px
+        const topBoundary = firstLandTileY + northAdjustment; // 0 + 76 = 76
+
+        // South boundary: Extend beyond last land tile by specified ratio
+        const lastLandTileY = landTilePositionsY[landTilePositionsY.length - 1]; // 1408 (for 1536px world)
+        const southExtension = TILE_SIZE * SOUTH_EXTEND_RATIO; // 128 * 0.875 = 112px
+        const bottomBoundary = lastLandTileY + TILE_SIZE + southExtension; // 1408 + 128 + 112 = 1648
+
+        // Verification: World ends at 1536px, so we extend 112px into ocean (reasonable)
+        // Final boundary after hero radius: 1648 - 8 = 1640px
+
+        // Log the calculations for transparency
+        console.log(`📏 BOUNDARY DERIVATION:`);
+        console.log(
+            `  West: tile_0(${firstLandTileX}) + ${WEST_INSET_RATIO}*tile(${westAdjustment}) = ${leftBoundary}`
+        );
+        console.log(
+            `  East: tile_last(${lastLandTileX}) + 1*tile(${TILE_SIZE}) + ${EAST_EXTEND_RATIO}*tile(${eastExtension}) = ${rightBoundary}`
+        );
+        console.log(
+            `  North: tile_0(${firstLandTileY}) + ${NORTH_INSET_RATIO}*tile(${northAdjustment}) = ${topBoundary}`
+        );
+        console.log(
+            `  South: tile_last(${lastLandTileY}) + 1*tile(${TILE_SIZE}) + ${SOUTH_EXTEND_RATIO}*tile(${southExtension}) = ${bottomBoundary}`
+        );
+
+        // Apply hero collision radius
+        const boundaries: WorldBoundaries = {
+            left: leftBoundary + HERO_COLLISION_RADIUS, // 96 + 8 = 104
+            right: rightBoundary - HERO_COLLISION_RADIUS, // 2004 - 8 = 1996
+            top: topBoundary + HERO_COLLISION_RADIUS, // 76 + 8 = 84
+            bottom: bottomBoundary - HERO_COLLISION_RADIUS, // 1552 - 8 = 1544
+            width: 0, // Will be calculated below
+            height: 0, // Will be calculated below
+        };
+
+        boundaries.width = boundaries.right - boundaries.left;
+        boundaries.height = boundaries.bottom - boundaries.top;
+
+        console.log('🗺️ CALCULATED PLAY FIELD BOUNDARIES:');
+        console.log(`  Left: ${boundaries.left}, Right: ${boundaries.right}`);
+        console.log(`  Top: ${boundaries.top}, Bottom: ${boundaries.bottom}`);
+        console.log(`  Size: ${boundaries.width} x ${boundaries.height}`);
+
+        // Update world dimensions in the scene to match tile-aligned values
+        this.updateWorldDimensions(WORLD_WIDTH, WORLD_HEIGHT);
+
+        return boundaries;
+    }
+
+    /**
+     * Update world dimensions to be tile-aligned throughout the scene
+     */
+    private updateWorldDimensions(newWidth: number, newHeight: number): void {
+        // This will be used by other systems that need world dimensions
+        console.log(`🔄 Updated world dimensions: ${newWidth}x${newHeight}`);
+
+        // Note: We should update the world generation and other systems to use these new dimensions
+        // For now, this ensures our boundary calculations are consistent
+    }
+
+    /**
+     * Check if a position is within the playable area
+     */
+    private isWithinPlayField(x: number, y: number): boolean {
+        return (
+            x >= this.playField.left &&
+            x <= this.playField.right &&
+            y >= this.playField.top &&
+            y <= this.playField.bottom
+        );
+    }
+
+    /**
+     * Clamp a position to stay within playable boundaries
+     */
+    private clampToPlayField(x: number, y: number): { x: number; y: number } {
+        return {
+            x: Math.max(this.playField.left, Math.min(this.playField.right, x)),
+            y: Math.max(this.playField.top, Math.min(this.playField.bottom, y)),
+        };
     }
 
     create(data?: {
@@ -38,9 +205,13 @@ export class OverworldScene extends Scene {
     }) {
         console.log('🎮 OVERWORLD SCENE LOADING...');
 
+        // Calculate precise playable boundaries first
+        this.playField = this.calculatePlayField();
+
         // Set up camera bounds to include ocean area around the world
-        const worldWidth = 2000;
-        const worldHeight = 1500;
+        // Use tile-aligned dimensions
+        const worldWidth = 16 * 128; // 2048px (16 tiles)
+        const worldHeight = 12 * 128; // 1536px (12 tiles)
         const oceanPadding = 300; // Extra space for ocean around the world
         this.cameras.main.setBounds(
             -oceanPadding,
@@ -64,8 +235,8 @@ export class OverworldScene extends Scene {
             }
         } else {
             console.log('🆕 Generating new world...');
-            // Generate world
-            this.worldData = this.worldGen.generateWorld(2000, 1500);
+            // Generate world with tile-aligned dimensions
+            this.worldData = this.worldGen.generateWorld(16 * 128, 12 * 128); // 2048x1536
             this.encounterSystem.updateZonesForPOIs(this.worldData.pois);
         }
 
@@ -80,7 +251,23 @@ export class OverworldScene extends Scene {
         // Create hero sprite - use saved position if returning from POI, otherwise default
         const heroX = data?.heroPosition?.x ?? 1000;
         const heroY = data?.heroPosition?.y ?? 750;
-        this.heroSprite = this.add.sprite(heroX, heroY, 'medievalRTS', 'medievalUnit_01.png');
+
+        // Ensure initial position is within playable boundaries
+        const clampedPosition = this.clampToPlayField(heroX, heroY);
+
+        console.log(
+            `🎮 Initial hero position: requested (${heroX}, ${heroY}), clamped to (${clampedPosition.x}, ${clampedPosition.y})`
+        );
+        console.log(
+            `🗺️ Play field: X[${this.playField.left}-${this.playField.right}] Y[${this.playField.top}-${this.playField.bottom}]`
+        );
+
+        this.heroSprite = this.add.sprite(
+            clampedPosition.x,
+            clampedPosition.y,
+            'medievalRTS',
+            'medievalUnit_01.png'
+        );
         this.heroSprite.setScale(0.8); // Scale up the unit sprite appropriately
         this.cameras.main.startFollow(this.heroSprite);
 
@@ -326,6 +513,14 @@ export class OverworldScene extends Scene {
                 // Determine if we're in ocean or land area
                 const isOcean = x < 0 || y < 0 || x >= worldWidth || y >= worldHeight;
 
+                // Debug: Log problematic tile placements
+                if (x >= 0 && x < worldWidth && y >= 0 && y < worldHeight && isOcean) {
+                    console.log(`🚨 BUG: Ocean tile placed in land area at x=${x}, y=${y}`);
+                }
+                if (x < 0 && !isOcean) {
+                    console.log(`🚨 BUG: Land tile placed in ocean area at x=${x}, y=${y}`);
+                }
+
                 if (isOcean) {
                     // Ocean tiles
                     const tileKey = Phaser.Utils.Array.GetRandom(oceanTiles);
@@ -533,18 +728,25 @@ export class OverworldScene extends Scene {
             moved = true;
         }
 
-        // Apply world boundary checking
-        const worldWidth = 2000;
-        const worldHeight = 1500;
-        const heroHalfSize = 8; // Approximate hero sprite size for boundary checking
-
-        // Clamp position to world bounds
-        newX = Math.max(heroHalfSize, Math.min(worldWidth - heroHalfSize, newX));
-        newY = Math.max(heroHalfSize, Math.min(worldHeight - heroHalfSize, newY));
+        // Apply precise playable area boundary checking
+        const clampedPosition = this.clampToPlayField(newX, newY);
+        newX = clampedPosition.x;
+        newY = clampedPosition.y;
 
         // Apply the clamped position
         if (newX !== this.heroSprite.x || newY !== this.heroSprite.y) {
             this.heroSprite.setPosition(newX, newY);
+        }
+
+        // Debug: Show current position and play field status
+        if (moved) {
+            const isInBounds = this.isWithinPlayField(this.heroSprite.x, this.heroSprite.y);
+            console.log(
+                `🎮 Hero position: (${Math.round(this.heroSprite.x)}, ${Math.round(this.heroSprite.y)}) - ${isInBounds ? '✅ IN BOUNDS' : '❌ OUT OF BOUNDS'}`
+            );
+            console.log(
+                `🗺️ Play field: X[${this.playField.left}-${this.playField.right}] Y[${this.playField.top}-${this.playField.bottom}]`
+            );
         }
 
         // Update debug info, mini-map, and POI visuals

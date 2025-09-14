@@ -11,6 +11,12 @@ interface WorldBoundaries {
     height: number;
 }
 
+interface MiniMapContainer extends Phaser.GameObjects.Container {
+    mapScale?: number;
+    playFieldLeft?: number;
+    playFieldTop?: number;
+}
+
 export class OverworldScene extends Scene {
     private heroSprite?: Phaser.GameObjects.Sprite;
     private worldGen: WorldGenerator;
@@ -23,7 +29,7 @@ export class OverworldScene extends Scene {
     private keys: { [key: string]: Phaser.Input.Keyboard.Key } = {};
     private poiLabels: Map<string, Phaser.GameObjects.Text> = new Map();
     private heroIndicator?: Phaser.GameObjects.Arc;
-    private miniMapContainer?: Phaser.GameObjects.Container;
+    private miniMapContainer?: MiniMapContainer;
     private miniMapBorder?: Phaser.GameObjects.Rectangle;
     private miniMapTitle?: Phaser.GameObjects.Text;
 
@@ -421,9 +427,16 @@ export class OverworldScene extends Scene {
         // Ensure the container was created successfully
         if (!this.miniMapContainer) return;
 
-        // Position the container in the top-right corner of the viewport
+        // Calculate optimal minimap dimensions based on playfield proportions
+        const playfieldWidth = this.playField.width;
+        const playfieldHeight = this.playField.height;
+        const playfieldAspectRatio = playfieldWidth / playfieldHeight;
+
+        // Use a base width and calculate height to match playfield proportions
         const miniMapWidth = 120;
-        const miniMapHeight = 170;
+        const miniMapHeight = Math.round(miniMapWidth / playfieldAspectRatio);
+
+        // Position the container in the top-right corner of the viewport
         const miniMapX = this.cameras.main.width - miniMapWidth - 20; // 20px from right edge
         const miniMapY = 20; // 20px from top
 
@@ -431,12 +444,20 @@ export class OverworldScene extends Scene {
         this.miniMapContainer.setScrollFactor(0); // Don't scroll with camera
         this.miniMapContainer.setDepth(1000); // High depth for HUD overlay
 
-        const scale = 0.1; // Scale down the world coordinates
+        // Scale to fit playfield exactly in the minimap
+        const scale = miniMapWidth / playfieldWidth;
+
+        // Store scale for use in updateHeroIndicator
+        this.miniMapContainer.mapScale = scale;
+        this.miniMapContainer.playFieldLeft = this.playField.left;
+        this.miniMapContainer.playFieldTop = this.playField.top;
 
         this.worldData.pois.forEach((poi) => {
-            // Convert world coordinates to minimap coordinates (relative to container)
-            const indicatorX = poi.x * scale;
-            const indicatorY = poi.y * scale;
+            // Convert world coordinates to minimap coordinates (relative to playfield bounds)
+            const relativeX = poi.x - this.playField.left;
+            const relativeY = poi.y - this.playField.top;
+            const indicatorX = relativeX * scale;
+            const indicatorY = relativeY * scale;
 
             // Small dot for each POI
             const indicator = this.add.circle(indicatorX, indicatorY, 3, this.poiColors[poi.type]);
@@ -628,13 +649,20 @@ export class OverworldScene extends Scene {
     }
 
     private updateHeroIndicator() {
-        if (!this.heroSprite || !this.heroIndicator) return;
+        if (!this.heroSprite || !this.heroIndicator || !this.miniMapContainer) return;
 
-        const scale = 0.1;
+        // Get the stored scale and playfield bounds from the minimap container
+        const scale = this.miniMapContainer.mapScale;
+        const playFieldLeft = this.miniMapContainer.playFieldLeft;
+        const playFieldTop = this.miniMapContainer.playFieldTop;
 
-        // Position relative to the minimap container (not world coordinates)
-        const indicatorX = this.heroSprite.x * scale;
-        const indicatorY = this.heroSprite.y * scale;
+        if (!scale || playFieldLeft === undefined || playFieldTop === undefined) return;
+
+        // Convert world coordinates to minimap coordinates (relative to playfield bounds)
+        const relativeX = this.heroSprite.x - playFieldLeft;
+        const relativeY = this.heroSprite.y - playFieldTop;
+        const indicatorX = relativeX * scale;
+        const indicatorY = relativeY * scale;
 
         this.heroIndicator.setPosition(indicatorX, indicatorY);
     }

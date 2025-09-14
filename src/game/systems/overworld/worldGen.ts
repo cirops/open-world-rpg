@@ -37,6 +37,7 @@ export class WorldGenerator {
 
     /**
      * Generate a world with POIs placed using seeded random generation
+     * POIs are placed within the playable land area, not in the surrounding ocean
      */
     generateWorld(width: number = 2000, height: number = 1500): WorldSeed {
         const pois: POI[] = [];
@@ -54,6 +55,16 @@ export class WorldGenerator {
             keep: ['Highwatch Keep', 'Stormhold Fortress', 'Ironclad Bastion', 'Crimson Tower'],
         };
 
+        // Define playable boundaries (land area only, excluding ocean)
+        // Based on OverworldScene tile-aligned calculations with hero collision radius
+        const PLAYABLE_LEFT = 104;
+        const PLAYABLE_RIGHT = 1996;
+        const PLAYABLE_TOP = 84;
+        const PLAYABLE_BOTTOM = 1544;
+
+        const playableWidth = PLAYABLE_RIGHT - PLAYABLE_LEFT;
+        const playableHeight = PLAYABLE_BOTTOM - PLAYABLE_TOP;
+
         // Generate 8-12 POIs
         const numPOIs = Math.floor(this.seededRandom() * 5) + 8;
 
@@ -62,17 +73,17 @@ export class WorldGenerator {
             let attempts = 0;
             const maxAttempts = 50;
 
-            // Find a valid position that's not too close to existing POIs
+            // Find a valid position within playable land area that's not too close to existing POIs
             do {
-                x = Math.floor(this.seededRandom() * width);
-                y = Math.floor(this.seededRandom() * height);
+                x = PLAYABLE_LEFT + Math.floor(this.seededRandom() * playableWidth);
+                y = PLAYABLE_TOP + Math.floor(this.seededRandom() * playableHeight);
                 attempts++;
             } while (attempts < maxAttempts && this.isTooClose(x, y, pois, minDistance));
 
             if (attempts >= maxAttempts) {
                 // If we can't find a spot, place it anyway but with reduced distance
-                x = Math.floor(this.seededRandom() * width);
-                y = Math.floor(this.seededRandom() * height);
+                x = PLAYABLE_LEFT + Math.floor(this.seededRandom() * playableWidth);
+                y = PLAYABLE_TOP + Math.floor(this.seededRandom() * playableHeight);
             }
 
             const type = poiTypes[Math.floor(this.seededRandom() * poiTypes.length)];
